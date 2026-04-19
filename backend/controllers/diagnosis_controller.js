@@ -25,13 +25,22 @@ export const createDiagnosis = async (req, res) => {
     try {
         const farmerID = req.farmerID;
         const { cropType, fieldId } = req.body;
-        const location = JSON.parse(req.body.location);
 
         // --- Validate required fields ---
-        if (!cropType || !fieldId || !location) {
-            return res.status(400).json({ message: "Missing required fields: cropType, fieldId, location" });
+        if (!cropType || !req.body.location) {
+            return res.status(400).json({ message: "Missing required fields: cropType, location" });
         }
-        if (!location.latitude || !location.longitude) {
+
+        let location;
+        try {
+            location = typeof req.body.location === "string"
+                ? JSON.parse(req.body.location)
+                : req.body.location;
+        } catch {
+            return res.status(400).json({ message: "Invalid location format. Must be JSON: {latitude, longitude, accuracy}" });
+        }
+
+        if (!location || !location.latitude || !location.longitude) {
             return res.status(400).json({ message: "Location must have latitude and longitude" });
         }
 
@@ -45,35 +54,45 @@ export const createDiagnosis = async (req, res) => {
             return res.status(500).json({ message: "Image upload failed — no URL returned from Cloudinary" });
         }
 
-        // --- Fetch the registered field ---
-        const field = await Field.findOne({ _id: fieldId, farmer: farmerID });
-        if (!field) {
-            return res.status(404).json({ message: "Field not found or doesn't belong to you" });
-        }
-
         // --- Fetch farmer for language preference ---
         const farmer = await Farmer.findById(farmerID);
 
-        // --- GPS Verification: check distance from registered field ---
-        const distance = calculateDistance(
-            field.location.latitude,
-            field.location.longitude,
-            location.latitude,
-            location.longitude
-        );
-        const distanceRounded = Math.round(distance);
-        const locationVerified = distance <= MAX_FIELD_DISTANCE;
+        // --- Field verification (optional — skip if no fieldId) ---
+        let field = null;
+        let locationVerified = false;
+        let distanceRounded = 0;
 
-        if (!locationVerified) {
-            return res.status(403).json({
-                message: "Location verification failed",
-                detail: `You are ${distanceRounded}m away from your registered field. Must be within ${MAX_FIELD_DISTANCE}m.`,
-                distanceFromField: distanceRounded,
-            });
+        if (fieldId) {
+            field = await Field.findOne({ _id: fieldId, farmer: farmerID });
+            if (!field) {
+                return res.status(404).json({ message: "Field not found or doesn't belong to you" });
+            }
+
+            // --- GPS Verification: check distance from registered field ---
+            const distance = calculateDistance(
+                field.location.latitude,
+                field.location.longitude,
+                location.latitude,
+                location.longitude
+            );
+            distanceRounded = Math.round(distance);
+            locationVerified = distance <= MAX_FIELD_DISTANCE;
+
+            if (!locationVerified) {
+                return res.status(403).json({
+                    message: "Location verification failed",
+                    detail: `You are ${distanceRounded}m away from your registered field. Must be within ${MAX_FIELD_DISTANCE}m.`,
+                    distanceFromField: distanceRounded,
+                });
+            }
+        } else {
+            // No field → still capture location, mark as unverified
+            locationVerified = false;
+            distanceRounded = 0;
         }
 
         // --- Send image and crop type to AI for disease detection ---
-        const aiResult = await analyzeImage(imageUrl, req.body.cropType || field.currentCrop || "unknown");
+        const aiResult = await analyzeImage(imageUrl, req.body.cropType || (field && field.currentCrop) || "unknown");
 
         // --- Get treatment plan ---
         // If Plant.id returned expert treatment → use it directly

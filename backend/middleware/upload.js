@@ -1,8 +1,11 @@
-import createCloudinaryStorage from "multer-storage-cloudinary";// this brings in the CloudinaryStorage factory from the package
-import multer from "multer";// for file uplod
-import cloudinary from "../config/cloudinary.js";// for img storage to get image string
+import multerStorageCloudinary from "multer-storage-cloudinary";
+import multer from "multer";
+import cloudinary from "../config/cloudinary.js";
 
-const storage = createCloudinaryStorage({
+// Handle both named and default exports depending on package version
+const CloudinaryStorage = multerStorageCloudinary.CloudinaryStorage || multerStorageCloudinary;
+
+const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params:{
         folder:"kisantrust/diagnoses",

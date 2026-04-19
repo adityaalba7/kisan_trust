@@ -248,7 +248,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-8 text-[14px] w-full max-w-[600px]">
               <div className="flex flex-col gap-3">
                 <div className="font-bold text-[#4B5241] mb-2 text-[15px]">Platform</div>
-                <a href="#" className="hover:text-[#64B43C] transition-colors">How it works</a>
+                <Link to="/how-it-works" className="hover:text-[#64B43C] transition-colors">How it works</Link>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="font-bold text-[#4B5241] mb-2 text-[15px]">Company</div>

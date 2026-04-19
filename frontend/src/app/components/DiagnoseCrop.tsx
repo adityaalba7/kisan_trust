@@ -1,12 +1,71 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import FarmerLayout from "./FarmerLayout";
-import { Camera, MapPin, Search, ChevronDown, CheckCircle2, ShieldAlert, AlertTriangle, ChevronRight, Activity, Bell, SplitSquareHorizontal } from "lucide-react";
+import { Camera, MapPin, Search, ChevronDown, CheckCircle2, ShieldAlert, AlertTriangle, ChevronRight, Activity, Bell, SplitSquareHorizontal, ArrowRight, TrendingUp, Clock, Upload, Loader2 } from "lucide-react";
+import { diagnosis as diagnosisApi, fields as fieldsApi } from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
+import { t, type Language } from "../i18n/translations";
+
+interface LocationData {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+}
 
 export default function DiagnoseCrop() {
-  const [state, setState] = useState<"ready" | "analyzing" | "results" | "comparison">("ready");
-  const [analyzingText, setAnalyzingText] = useState("Identifying disease markers...");
+  const { refreshFarmerProfile, farmerUser } = useAuth();
+  const lang = (farmerUser?.language || "english") as Language;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [state, setState] = useState<"ready" | "analyzing" | "results">("ready");
+  const [analyzingText, setAnalyzingText] = useState("Identifying disease markers...");
+  const [error, setError] = useState("");
+
+  // Upload state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [location, setLocation] = useState<LocationData | null>(null);
+  const [locationStatus, setLocationStatus] = useState<"detecting" | "found" | "failed">("detecting");
+  const [userFields, setUserFields] = useState<any[]>([]);
+  const [selectedFieldId, setSelectedFieldId] = useState("");
+  const [cropType, setCropType] = useState("");
+
+  // Results state
+  const [result, setResult] = useState<any>(null);
+
+  // Get GPS on mount
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+          });
+          setLocationStatus("found");
+        },
+        () => setLocationStatus("failed"),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } else {
+      setLocationStatus("failed");
+    }
+  }, []);
+
+  // Fetch fields on mount
+  useEffect(() => {
+    fieldsApi.getAll().then((data) => {
+      const list = data.fields || data || [];
+      setUserFields(Array.isArray(list) ? list : []);
+      if (list.length > 0) {
+        setSelectedFieldId(list[0]._id);
+        if (list[0].currentCrop) setCropType(list[0].currentCrop);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Analyzing text animation
   useEffect(() => {
     if (state === "analyzing") {
       const texts = ["Identifying disease markers...", "Checking regional outbreak data...", "Preparing your treatment plan..."];
@@ -16,30 +75,67 @@ export default function DiagnoseCrop() {
         setAnalyzingText(texts[i]);
       }, 1500);
       
-      const timeout = setTimeout(() => {
-        setState("results");
-      }, 4500);
-      
-      return () => { clearInterval(interval); clearTimeout(timeout); };
+      return () => clearInterval(interval);
     }
   }, [state]);
 
-  const handleUpload = () => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      setError("Please select an image first");
+      return;
+    }
+    if (!cropType) {
+      setError("Please select a crop type");
+      return;
+    }
+
+    setError("");
     setState("analyzing");
+
+    try {
+      const formData = new FormData();
+      formData.append("image", selectedFile);
+      formData.append("cropType", cropType);
+      
+      if (selectedFieldId) formData.append("fieldId", selectedFieldId);
+      if (location) {
+        formData.append("location", JSON.stringify({
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+        }));
+      }
+
+      const data = await diagnosisApi.create(formData);
+      setResult(data.diagnosis || data);
+      setState("results");
+
+      // Refresh profile to update score in sidebar
+      refreshFarmerProfile().catch(() => {});
+    } catch (err: any) {
+      setError(err.message || "Diagnosis failed. Please try again.");
+      setState("ready");
+    }
+  };
+
+  const fieldDropdownLabel = () => {
+    if (userFields.length === 0) return "No fields registered";
+    const f = userFields.find(f => f._id === selectedFieldId);
+    return f ? `🌾 ${f.fieldName || "Field"} — ${f.currentCrop || ""}` : "Select field";
   };
 
   return (
     <FarmerLayout>
       <div className="flex flex-col gap-6 pb-20 md:pb-0 max-w-[800px] mx-auto relative">
         
-        {/* Admin toggle for testing states */}
-        <div className="fixed top-24 right-8 z-50 bg-white dark:bg-[#1A3A1A] shadow-md p-2 rounded-lg flex gap-2 text-[10px] hidden md:flex border border-[#1A3A1A]/10 dark:border-white/10">
-          <button onClick={() => setState("ready")} className="px-2 py-1 bg-gray-100 dark:bg-white/10 dark:text-white rounded">1</button>
-          <button onClick={() => setState("analyzing")} className="px-2 py-1 bg-gray-100 dark:bg-white/10 dark:text-white rounded">2</button>
-          <button onClick={() => setState("results")} className="px-2 py-1 bg-gray-100 dark:bg-white/10 dark:text-white rounded">3</button>
-          <button onClick={() => setState("comparison")} className="px-2 py-1 bg-gray-100 dark:bg-white/10 dark:text-white rounded">4</button>
-        </div>
-
         <AnimatePresence mode="wait">
           {state === "ready" && (
             <motion.div key="s1" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-6">
@@ -52,39 +148,110 @@ export default function DiagnoseCrop() {
                 <p className="text-[13px] text-[#6B7B5E] dark:text-white/60 max-w-[300px]">Ensure the leaf is well lit. Your GPS location is being captured automatically for verification.</p>
               </div>
 
+              {/* Location Status */}
               <div className="flex items-center justify-between text-[12px] bg-white dark:bg-[#1A3A1A] px-4 py-2.5 rounded-[8px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-sm transition-colors duration-500">
                 <div className="flex items-center gap-2 text-[#1A3A1A] dark:text-white">
-                  <div className="w-2 h-2 rounded-full bg-[#27AE60] animate-pulse" />
-                  <span className="font-medium">Location verified:</span> Rohtak Field 1, 23m accuracy
+                  <div className={`w-2 h-2 rounded-full ${locationStatus === "found" ? "bg-[#27AE60] animate-pulse" : locationStatus === "detecting" ? "bg-[#F39C12] animate-pulse" : "bg-[#C0392B]"}`} />
+                  <span className="font-medium">
+                    {locationStatus === "found" && `Location verified: ${location?.accuracy ? `${Math.round(location.accuracy)}m accuracy` : "OK"}`}
+                    {locationStatus === "detecting" && "Detecting location..."}
+                    {locationStatus === "failed" && "Location unavailable — GPS disabled"}
+                  </span>
                 </div>
                 <MapPin size={14} className="text-[#64B43C]" />
               </div>
 
-              <div 
-                onClick={handleUpload}
-                className="group relative h-[300px] border-2 border-dashed border-[#C5D5B5] dark:border-white/20 rounded-[14px] flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-[#64B43C] hover:bg-[#E8F5E0]/50 dark:hover:bg-white/5 transition-all"
-              >
-                <div className="w-16 h-16 rounded-full bg-[#FAFBF7] dark:bg-[#1A3A1A] flex items-center justify-center text-[#6B7B5E] dark:text-white/50 group-hover:text-[#64B43C] dark:group-hover:text-[#64B43C] transition-colors border border-[rgba(26,58,26,0.05)] shadow-sm">
-                  <Camera size={28} />
-                </div>
-                <span className="text-[16px] text-[#1A3A1A] dark:text-white font-medium">Tap to photograph or upload</span>
-                <span className="text-[13px] text-[#6B7B5E] dark:text-[#A4B598]">Accepts JPG, PNG</span>
+              {/* Crop Type Selector */}
+              <div className="bg-white dark:bg-[#1A3A1A] p-4 rounded-[10px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-sm transition-colors duration-500">
+                <label className="text-[12px] text-[#6B7B5E] dark:text-[#A4B598] font-medium mb-2 block">Crop Type</label>
+                <select
+                  value={cropType}
+                  onChange={e => setCropType(e.target.value)}
+                  className="w-full h-10 px-3 rounded-[8px] bg-[#FAFBF7] dark:bg-[#111E11] border border-[#C5D5B5] dark:border-white/10 text-[#1A3A1A] dark:text-white text-[14px] outline-none focus:border-[#64B43C] transition-colors"
+                >
+                  <option value="">Select crop type</option>
+                  {["Wheat", "Rice", "Cotton", "Sugarcane", "Maize", "Tomato", "Grapes", "Vegetables"].map(c => (
+                    <option key={c} value={c.toLowerCase()}>{c}</option>
+                  ))}
+                </select>
               </div>
 
-              <div className="bg-white dark:bg-[#1A3A1A] p-4 rounded-[10px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-sm flex items-center justify-between cursor-pointer group hover:bg-[#FAFBF7] dark:hover:bg-white/5 transition-colors duration-500">
-                <div className="flex flex-col">
-                  <span className="text-[12px] text-[#6B7B5E] dark:text-[#A4B598]">Uploading for field:</span>
-                  <span className="text-[14px] text-[#1A3A1A] dark:text-white font-medium flex items-center gap-2">🌾 Kharif Wheat — Field 1</span>
-                </div>
-                <ChevronDown size={16} className="text-[#1A3A1A] dark:text-white/70 group-hover:text-[#64B43C]" />
+              {/* Upload Area */}
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className={`group relative h-[300px] border-2 border-dashed rounded-[14px] flex flex-col items-center justify-center gap-4 cursor-pointer transition-all ${
+                  previewUrl 
+                    ? "border-[#64B43C] bg-[#E8F5E0]/30 dark:bg-white/5" 
+                    : "border-[#C5D5B5] dark:border-white/20 hover:border-[#64B43C] hover:bg-[#E8F5E0]/50 dark:hover:bg-white/5"
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Preview" className="w-full h-full object-cover rounded-[12px]" />
+                ) : (
+                  <>
+                    <div className="w-16 h-16 rounded-full bg-[#FAFBF7] dark:bg-[#1A3A1A] flex items-center justify-center text-[#6B7B5E] dark:text-white/50 group-hover:text-[#64B43C] dark:group-hover:text-[#64B43C] transition-colors border border-[rgba(26,58,26,0.05)] shadow-sm">
+                      <Camera size={28} />
+                    </div>
+                    <span className="text-[16px] text-[#1A3A1A] dark:text-white font-medium">Tap to photograph or upload</span>
+                    <span className="text-[13px] text-[#6B7B5E] dark:text-[#A4B598]">Accepts JPG, PNG</span>
+                  </>
+                )}
               </div>
+
+              {/* Field Selector */}
+              {userFields.length > 0 && (
+                <div className="bg-white dark:bg-[#1A3A1A] p-4 rounded-[10px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-sm transition-colors duration-500">
+                  <label className="text-[12px] text-[#6B7B5E] dark:text-[#A4B598] font-medium mb-2 block">Uploading for field:</label>
+                  <select
+                    value={selectedFieldId}
+                    onChange={e => {
+                      setSelectedFieldId(e.target.value);
+                      const f = userFields.find(f => f._id === e.target.value);
+                      if (f?.currentCrop) setCropType(f.currentCrop);
+                    }}
+                    className="w-full h-10 px-3 rounded-[8px] bg-[#FAFBF7] dark:bg-[#111E11] border border-[#C5D5B5] dark:border-white/10 text-[#1A3A1A] dark:text-white text-[14px] outline-none focus:border-[#64B43C] transition-colors"
+                  >
+                    {userFields.map(f => (
+                      <option key={f._id} value={f._id}>🌾 {f.fieldName || "Field"} — {f.currentCrop || ""}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-[8px] text-[13px]">
+                  {error}
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <button
+                onClick={handleUpload}
+                disabled={!selectedFile || !cropType}
+                className="w-full h-[48px] rounded-[10px] bg-[#1A3A1A] dark:bg-[#64B43C] text-white dark:text-[#1A3A1A] font-medium text-[16px] hover:scale-[1.02] hover:bg-[#2A4A2A] dark:hover:bg-[#539630] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+              >
+                <Upload size={20} /> Analyze Crop
+              </button>
             </motion.div>
           )}
 
           {state === "analyzing" && (
             <motion.div key="s2" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="flex flex-col gap-6">
               <div className="relative h-[400px] w-full rounded-[14px] overflow-hidden border border-[#1A3A1A]/10 shadow-[0_4px_16px_rgba(26,58,26,0.1)]">
-                <img src="https://images.unsplash.com/photo-1741874299706-2b8e16839aaa?w=800&q=80" alt="Crop" className="w-full h-full object-cover grayscale" />
+                {previewUrl ? (
+                  <img src={previewUrl} alt="Crop" className="w-full h-full object-cover grayscale" />
+                ) : (
+                  <div className="w-full h-full bg-[#E8F5E0] dark:bg-[#1A3A1A]" />
+                )}
                 
                 {/* Overlay & Scanning Line */}
                 <div className="absolute inset-0 bg-[#1A3A1A]/80 z-10 flex flex-col items-center justify-center gap-6">
@@ -101,7 +268,7 @@ export default function DiagnoseCrop() {
                   </div>
                   
                   <div className="flex flex-col items-center text-center px-4">
-                    <h3 className="font-heading text-[24px] text-[#FAFBF7] mb-2">Analyzing your crop...</h3>
+                    <h3 className="font-heading text-[24px] text-[#FAFBF7] mb-2">{t("Analyzing your crop...", lang)}</h3>
                     <motion.p 
                       key={analyzingText}
                       initial={{ opacity: 0, y: 5 }}
@@ -122,7 +289,7 @@ export default function DiagnoseCrop() {
             </motion.div>
           )}
 
-          {state === "results" && (
+          {state === "results" && result && (
             <motion.div key="s3" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-6">
               
               {/* Score Impact Strip */}
@@ -134,134 +301,80 @@ export default function DiagnoseCrop() {
                 />
                 <div className="flex items-center gap-3 z-10">
                   <div className="w-8 h-8 rounded-full bg-[#64B43C] dark:bg-[#1A3A1A] flex items-center justify-center text-[#1A3A1A] dark:text-white">
-                    <span className="font-bold text-[14px]">+12</span>
+                    <span className="font-bold text-[14px]">✓</span>
                   </div>
-                  <span className="text-[14px] font-medium">Points added to your Agri-Trust Score</span>
-                </div>
-                <div className="flex items-center gap-4 mt-3 sm:mt-0 z-10 opacity-80 text-[13px] font-bold">
-                  <span className="line-through font-normal">736</span> <ArrowRight size={14} className="text-[#64B43C] dark:text-[#1A3A1A]" /> <span className="text-[#64B43C] dark:text-[#1A3A1A] text-[16px]">748</span>
+                  <span className="text-[14px] font-medium">{t("Diagnosis complete — score updated!", lang)}</span>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* DISEASE CARD */}
                 <div className="bg-white dark:bg-[#1A3A1A] rounded-[14px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-[0_2px_8px_rgba(26,58,26,0.04)] overflow-hidden relative flex flex-col transition-colors duration-500">
-                  <div className="h-1 w-full bg-[#F39C12]" />
+                  <div className={`h-1 w-full ${result.severity === "high" ? "bg-[#C0392B]" : result.severity === "medium" ? "bg-[#F39C12]" : "bg-[#27AE60]"}`} />
                   <div className="p-6 flex flex-col gap-4 relative">
-                    <img src="https://images.unsplash.com/photo-1741874299706-2b8e16839aaa?w=200&q=80" alt="Thumb" className="absolute top-6 right-6 w-16 h-16 rounded-[8px] object-cover border border-[#1A3A1A]/10 shadow-sm" />
+                    {result.imageUrl && (
+                      <img src={result.imageUrl} alt="Thumb" className="absolute top-6 right-6 w-16 h-16 rounded-[8px] object-cover border border-[#1A3A1A]/10 shadow-sm" />
+                    )}
                     
                     <div>
-                      <div className="bg-[#1A3A1A]/5 dark:bg-white/10 text-[#1A3A1A] dark:text-white px-2.5 py-1 rounded-[6px] text-[11px] font-bold inline-flex items-center gap-1 mb-3 border border-[#1A3A1A]/10 dark:border-white/5">
-                        <CheckCircle2 size={10} className="text-[#27AE60]" /> 94% confident
-                      </div>
-                      <h2 className="font-heading text-[28px] text-[#1A3A1A] dark:text-white leading-tight pr-20">Powdery Mildew</h2>
-                      <div className="bg-[#F39C12]/10 text-[#D68910] px-2.5 py-1 rounded-full text-[12px] font-bold inline-flex mt-2 items-center gap-1">
-                        <ShieldAlert size={12} /> Medium Severity
+                      {result.confidence && (
+                        <div className="bg-[#1A3A1A]/5 dark:bg-white/10 text-[#1A3A1A] dark:text-white px-2.5 py-1 rounded-[6px] text-[11px] font-bold inline-flex items-center gap-1 mb-3 border border-[#1A3A1A]/10 dark:border-white/5">
+                          <CheckCircle2 size={10} className="text-[#27AE60]" /> {Math.round(result.confidence || 0)}% confident
+                        </div>
+                      )}
+                      <h2 className="font-heading text-[28px] text-[#1A3A1A] dark:text-white leading-tight pr-20">{result.diseaseDetected || "Unknown Disease"}</h2>
+                      <div className={`px-2.5 py-1 rounded-full text-[12px] font-bold inline-flex mt-2 items-center gap-1 ${
+                        result.severity === "high" ? "bg-[#C0392B]/10 text-[#C0392B]" : 
+                        result.severity === "medium" ? "bg-[#F39C12]/10 text-[#D68910]" : 
+                        "bg-[#27AE60]/10 text-[#27AE60]"
+                      }`}>
+                        <ShieldAlert size={12} /> {result.severity ? `${result.severity.charAt(0).toUpperCase() + result.severity.slice(1)} Severity` : ""}
                       </div>
                     </div>
 
                     <div className="mt-4 pt-4 border-t border-[#1A3A1A]/10 dark:border-white/10 text-[13px] text-[#1A3A1A]/80 dark:text-white/80 leading-relaxed">
-                      <strong className="text-[#1A3A1A] dark:text-white">What is this?</strong><br/>
-                      A fungal disease that affects a wide range of plants. It appears as white, powdery spots on leaves and stems, reducing crop yield if untreated.
+                      <strong className="text-[#1A3A1A] dark:text-white">{t("Treatment Plan", lang)}:</strong><br/>
+                      {result.treatmentPlan || "Consult a local agricultural expert for specific treatment."}
                     </div>
                   </div>
                 </div>
 
-                {/* TREATMENT PLAN */}
+                {/* TREATMENT STEPS */}
                 <div className="bg-[#FAFBF7] dark:bg-[#111e11] rounded-[14px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 p-6 shadow-sm flex flex-col transition-colors duration-500">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-heading text-[20px] text-[#1A3A1A] dark:text-white">Your 7-Day Plan</h3>
-                    <div className="flex bg-white dark:bg-black/30 rounded-[6px] border border-[#1A3A1A]/10 dark:border-white/10 overflow-hidden text-[10px] font-bold text-[#1A3A1A] dark:text-white transition-colors duration-500">
-                      <button className="px-2 py-1 bg-[#E8F5E0] dark:bg-[#64B43C] dark:text-[#1A3A1A]">EN</button>
-                      <button className="px-2 py-1 border-l border-[#1A3A1A]/10 dark:border-white/10">हिं</button>
-                    </div>
-                  </div>
+                  <h3 className="font-heading text-[20px] text-[#1A3A1A] dark:text-white mb-6">{t("Recommended Actions", lang)}</h3>
 
                   <div className="flex flex-col gap-4">
-                    {[
-                      { day: 1, action: "Apply Neem Oil spray (2% concentration)", cost: "~₹80", done: false },
-                      { day: 4, action: "Remove heavily infected lower leaves", cost: "Manual", done: false },
-                      { day: 7, action: "Upload follow-up photo to verify recovery", cost: "Score boost", done: false, highlight: true }
-                    ].map((step, i) => (
-                      <div key={i} className={`flex items-start gap-3 p-3 rounded-[10px] transition-colors duration-500 ${step.highlight ? 'bg-[#E8F5E0] dark:bg-[#64B43C]/20 border border-[#64B43C]/20' : 'bg-white dark:bg-[#1A3A1A] border border-[#1A3A1A]/5 dark:border-white/5'}`}>
-                        <div className={`w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-colors duration-500 ${step.highlight ? 'bg-[#64B43C] text-white' : 'bg-[#1A3A1A]/10 dark:bg-white/10 text-[#1A3A1A] dark:text-white'}`}>
-                          D{step.day}
+                    {(result.recommendedAction || []).map((action: string, i: number) => (
+                      <div key={i} className={`flex items-start gap-3 p-3 rounded-[10px] transition-colors duration-500 ${i === (result.recommendedAction?.length || 1) - 1 ? 'bg-[#E8F5E0] dark:bg-[#64B43C]/20 border border-[#64B43C]/20' : 'bg-white dark:bg-[#1A3A1A] border border-[#1A3A1A]/5 dark:border-white/5'}`}>
+                        <div className={`w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[10px] font-bold transition-colors duration-500 ${i === (result.recommendedAction?.length || 1) - 1 ? 'bg-[#64B43C] text-white' : 'bg-[#1A3A1A]/10 dark:bg-white/10 text-[#1A3A1A] dark:text-white'}`}>
+                          {i + 1}
                         </div>
-                        <div className="flex flex-col">
-                          <span className={`text-[13px] font-medium transition-colors duration-500 ${step.highlight ? 'text-[#1A3A1A] dark:text-[#E8F5E0]' : 'text-[#1A3A1A]/90 dark:text-white/90'}`}>{step.action}</span>
-                          <span className="text-[11px] text-[#6B7B5E] dark:text-white/50 mt-0.5 transition-colors duration-500">{step.cost}</span>
-                        </div>
+                        <span className="text-[13px] font-medium text-[#1A3A1A]/90 dark:text-white/90">{action}</span>
                       </div>
                     ))}
                   </div>
 
-                  <div className="mt-auto pt-6">
-                    <div className="bg-white dark:bg-[#1A3A1A] p-3 rounded-[10px] border border-[#1A3A1A]/10 dark:border-white/10 flex items-center justify-between transition-colors duration-500">
-                      <div className="flex items-center gap-2">
-                        <Bell size={16} className="text-[#64B43C]" />
-                        <span className="text-[12px] font-medium text-[#1A3A1A] dark:text-white">Remind me on Day 7</span>
-                      </div>
-                      <div className="w-8 h-4 bg-[#64B43C] rounded-full relative cursor-pointer border-2 border-white dark:border-[#1A3A1A] shadow-sm transition-colors duration-500">
-                        <div className="absolute right-[2px] top-[2px] w-3 h-3 bg-white dark:bg-[#1A3A1A] rounded-full" />
+                  {result.followupDate && (
+                    <div className="mt-auto pt-6">
+                      <div className="bg-white dark:bg-[#1A3A1A] p-3 rounded-[10px] border border-[#1A3A1A]/10 dark:border-white/10 flex items-center justify-between transition-colors duration-500">
+                        <div className="flex items-center gap-2">
+                          <Bell size={16} className="text-[#64B43C]" />
+                          <span className="text-[12px] font-medium text-[#1A3A1A] dark:text-white">Follow up by {new Date(result.followupDate).toLocaleDateString()}</span>
+                        </div>
+                        <Clock size={14} className="text-[#6B7B5E]" />
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
-              
-              <button onClick={() => setState("comparison")} className="w-full text-center text-[12px] text-[#6B7B5E] hover:text-[#1A3A1A] underline mt-4">
-                View comparison mode (Judge Demo)
+
+              {/* Diagnose Another */}
+              <button
+                onClick={() => { setState("ready"); setResult(null); setSelectedFile(null); setPreviewUrl(null); setError(""); }}
+                className="w-full h-[44px] rounded-[10px] bg-white dark:bg-[#1A3A1A] text-[#1A3A1A] dark:text-white border border-[#1A3A1A]/10 dark:border-white/10 font-medium text-[14px] hover:bg-[#FAFBF7] dark:hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+              >
+                <Camera size={16} /> {t("Diagnose Another Crop", lang)}
               </button>
-            </motion.div>
-          )}
-
-          {state === "comparison" && (
-            <motion.div key="s4" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6 max-w-[900px]">
-              <div className="bg-white dark:bg-[#1A3A1A] rounded-[14px] border border-[rgba(26,58,26,0.1)] dark:border-white/10 shadow-[0_4px_16px_rgba(26,58,26,0.10)] overflow-hidden transition-colors duration-500">
-                
-                <div className="p-6 border-b border-[#1A3A1A]/10 dark:border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
-                  <div>
-                    <h2 className="font-heading text-[24px] text-[#1A3A1A] dark:text-white">Recovery Analysis</h2>
-                    <p className="text-[13px] text-[#6B7B5E] dark:text-white/60">Day 1 to Day 7 comparison</p>
-                  </div>
-                  <div className="bg-[#E8F5E0] dark:bg-white/10 px-4 py-2 rounded-full border border-[#64B43C]/20 dark:border-white/20 flex items-center gap-2">
-                    <span className="font-heading text-[24px] text-[#27AE60] dark:text-[#64B43C] leading-none">+67%</span>
-                    <span className="text-[12px] font-bold text-[#1A3A1A] dark:text-white">improvement</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col md:flex-row relative">
-                  <div className="flex-1 relative aspect-square md:aspect-auto md:h-[400px]">
-                    <img src="https://images.unsplash.com/photo-1741874299706-2b8e16839aaa?w=600&q=80" alt="Before" className="w-full h-full object-cover grayscale opacity-80" />
-                    <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-md text-white px-3 py-1 rounded-[6px] text-[12px] font-medium border border-white/10">Day 1: Severe</div>
-                  </div>
-                  
-                  {/* Split Icon */}
-                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white dark:bg-[#1A3A1A] rounded-full flex items-center justify-center z-10 shadow-lg border border-[#1A3A1A]/10 dark:border-white/20 text-[#1A3A1A] dark:text-white rotate-90 md:rotate-0 transition-colors duration-500">
-                    <SplitSquareHorizontal size={20} />
-                  </div>
-
-                  <div className="flex-1 relative aspect-square md:aspect-auto md:h-[400px]">
-                    <img src="https://images.unsplash.com/photo-1741874299706-2b8e16839aaa?w=600&q=80" alt="After" className="w-full h-full object-cover saturate-150 contrast-125" />
-                    <div className="absolute top-4 right-4 bg-[#64B43C]/90 backdrop-blur-md text-white px-3 py-1 rounded-[6px] text-[12px] font-medium border border-white/20 shadow-md">Day 7: Recovered</div>
-                  </div>
-                </div>
-
-                <div className="p-6 bg-[#FAFBF7] dark:bg-[#111E11] transition-colors duration-500">
-                  <p className="text-[16px] text-[#1A3A1A] dark:text-white font-medium text-center mb-6">
-                    "Your wheat has significantly recovered. Excellent response time."
-                  </p>
-                  
-                  <div className="flex flex-wrap justify-center gap-4 text-[12px]">
-                    <div className="bg-white dark:bg-[#1A3A1A] px-3 py-2 rounded-[8px] border border-[#1A3A1A]/10 dark:border-white/10 shadow-sm flex items-center gap-2 transition-colors duration-500">
-                      <Clock size={14} className="text-[#64B43C]" /> <span className="dark:text-white">Response Time</span> <span className="font-bold text-[#64B43C]">+5</span>
-                    </div>
-                    <div className="bg-white dark:bg-[#1A3A1A] px-3 py-2 rounded-[8px] border border-[#1A3A1A]/10 dark:border-white/10 shadow-sm flex items-center gap-2 transition-colors duration-500">
-                      <TrendingUp size={14} className="text-[#64B43C]" /> <span className="dark:text-white">Crop Improvement</span> <span className="font-bold text-[#64B43C]">+8</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </motion.div>
           )}
 

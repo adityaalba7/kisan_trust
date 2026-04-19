@@ -9,7 +9,7 @@ const loanApplicationSchema = new mongoose.Schema({
     lender: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Lender",
-        required: true,
+        default: null,
     },
     amountRequested: {
         type: Number,
@@ -17,8 +17,17 @@ const loanApplicationSchema = new mongoose.Schema({
     },
     purpose: {
         type: String,
-        enum: ["seeds", "fertilizer", "equipment", "irrigation", "other"],
+        enum: ["seeds", "fertilizer", "equipment", "irrigation", "livestock", "other"],
         required: true,
+    },
+    description: {
+        type: String,
+        default: "",
+        trim: true,
+    },
+    cropType: {
+        type: String,
+        default: "",
     },
     agriScoreAtTime: {
         type: Number,
@@ -26,7 +35,7 @@ const loanApplicationSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["pending", "approved", "rejected"],
+        enum: ["pending", "approved", "rejected", "under_review"],
         default: "pending",
     },
     lenderNote: {
@@ -36,3 +45,4 @@ const loanApplicationSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 export default mongoose.model("LoanApplication", loanApplicationSchema);
+

@@ -9,7 +9,7 @@ const diagnosis_Schema = new mongoose.Schema({
     field:{
         type:mongoose.Schema.Types.ObjectId,
         ref:'Field',
-        required:true,
+        required:false,
 
     },
     imageUrl:{

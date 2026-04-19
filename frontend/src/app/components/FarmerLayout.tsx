@@ -1,19 +1,60 @@
-import { Link, useLocation } from "react-router";
-import { LayoutDashboard, Camera, History, BarChart2, Settings, Globe, Bell, Menu, Sun, Moon } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
+import { LayoutDashboard, Camera, History, BarChart2, Settings, Globe, Bell, Menu, Sun, Moon, LogOut, FileText } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
+import { useAuth } from "../contexts/AuthContext";
+import { diagnosis as diagnosisApi } from "../services/api";
+import { t, getLangLabel, type Language } from "../i18n/translations";
+import ChatWidget from "./ChatWidget";
 
 export default function FarmerLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const path = location.pathname;
   const { isDarkTheme, toggleTheme } = useTheme();
+  const { farmerUser, farmerLogout } = useAuth();
+
+  const displayName = farmerUser?.name || "Farmer";
+  const firstName = displayName.split(" ")[0];
+  const initials = displayName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+  const village = farmerUser?.village || "";
+  const state = farmerUser?.state ? farmerUser.state.slice(0, 2).toUpperCase() : "";
+  const scoreValue = farmerUser?.agriTrustScore ?? 0;
+  const lang = (farmerUser?.language || "english") as Language;
+
+  // Fetch latest weather from most recent diagnosis
+  const [weather, setWeather] = useState<{temperature?: number; condition?: string} | null>(null);
+  useEffect(() => {
+    diagnosisApi.getAll().then((data) => {
+      const list = data.diagnoses || data || [];
+      if (Array.isArray(list) && list.length > 0 && list[0].weather) {
+        setWeather(list[0].weather);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleLogout = async () => {
+    await farmerLogout();
+    navigate("/login");
+  };
 
   const navItems = [
-    { id: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "/diagnose", label: "Diagnose Crop", icon: Camera },
-    { id: "/history", label: "My Log", icon: History },
-    { id: "#", label: "Score Details", icon: BarChart2 },
-    { id: "#", label: "Settings", icon: Settings },
+    { id: "/dashboard", label: t("Dashboard", lang), icon: LayoutDashboard },
+    { id: "/diagnose", label: t("Diagnose Crop", lang), icon: Camera },
+    { id: "/history", label: t("My Log", lang), icon: History },
+    { id: "/loan-apply", label: "Apply for Loan", icon: FileText },
+    { id: "/score", label: t("Score Details", lang), icon: BarChart2 },
+    { id: "/settings", label: t("Settings", lang), icon: Settings },
   ];
+
+  // Determine greeting by hour
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? t("Good morning", lang) : hour < 17 ? t("Good afternoon", lang) : t("Good evening", lang);
 
   return (
     <div className={`flex h-screen w-full overflow-hidden transition-colors duration-500 ${isDarkTheme ? "bg-[#111E11]" : "bg-[#FAFBF7]"}`}>
@@ -21,11 +62,11 @@ export default function FarmerLayout({ children }: { children: React.ReactNode }
       <aside className="hidden md:flex flex-col w-[240px] bg-[#1A3A1A] shrink-0 h-full relative z-20">
         <div className="p-6 border-b border-white/5 flex items-center gap-4">
           <div className="w-10 h-10 rounded-full bg-[#8B5E3C] flex items-center justify-center text-[#E8F5E0] font-heading text-[16px]">
-            RK
+            {initials}
           </div>
           <div className="flex flex-col">
-            <span className="text-[#FAFBF7] font-medium text-[14px]">Ramesh Kumar</span>
-            <span className="text-white/60 text-[12px]">Rohtak, HR</span>
+            <span className="text-[#FAFBF7] font-medium text-[14px]">{displayName}</span>
+            <span className="text-white/60 text-[12px]">{village}{state ? `, ${state}` : ""}</span>
           </div>
         </div>
 
@@ -53,15 +94,19 @@ export default function FarmerLayout({ children }: { children: React.ReactNode }
         </nav>
 
         <div className="p-4 border-t border-white/5 flex flex-col gap-4">
-          <button className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-[6px] text-white/70 text-[12px] hover:bg-white/10 transition-colors border border-white/10">
-            <span className="flex items-center gap-2"><Globe size={14} /> Powered by Bhashini</span>
-            <span className="font-bold text-[#64B43C]">EN</span>
-          </button>
+          <Link to="/settings" className="flex items-center justify-between bg-white/5 px-3 py-2 rounded-[6px] text-white/70 text-[12px] hover:bg-white/10 transition-colors border border-white/10">
+            <span className="flex items-center gap-2"><Globe size={14} /> {t("Language Preference", lang)}</span>
+            <span className="font-bold text-[#64B43C]">{getLangLabel(lang)}</span>
+          </Link>
           
           <div className="bg-[#111E11] p-3 rounded-[10px] border border-white/5 flex items-center justify-between">
-            <span className="text-[12px] text-white/60">Agri-Trust Score</span>
-            <span className="text-[#64B43C] font-heading font-bold text-[18px]">748</span>
+            <span className="text-[12px] text-white/60">{t("Agri-Trust Score", lang)}</span>
+            <span className="text-[#64B43C] font-heading font-bold text-[18px]">{scoreValue}</span>
           </div>
+
+          <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 rounded-[6px] text-white/50 text-[12px] hover:bg-white/10 hover:text-white/90 transition-colors">
+            <LogOut size={14} /> {t("Logout", lang)}
+          </button>
         </div>
       </aside>
 
@@ -74,14 +119,15 @@ export default function FarmerLayout({ children }: { children: React.ReactNode }
               <Menu size={24} />
             </button>
             <div className="flex flex-col">
-              <h2 className={`font-heading text-[24px] leading-tight transition-colors duration-500 ${isDarkTheme ? "text-white" : "text-[#1A3A1A]"}`}>Good morning, Ramesh 🌱</h2>
-              <p className={`text-[13px] hidden sm:block ${isDarkTheme ? "text-white/60" : "text-[#6B7B5E]"}`}>Your Kharif wheat is in its 4th week. Time for a check-up?</p>
+              <h2 className={`font-heading text-[24px] leading-tight transition-colors duration-500 ${isDarkTheme ? "text-white" : "text-[#1A3A1A]"}`}>{greeting}, {firstName} 🌱</h2>
+              <p className={`text-[13px] hidden sm:block ${isDarkTheme ? "text-white/60" : "text-[#6B7B5E]"}`}>{t("Your crop health dashboard is ready.", lang)}</p>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
             <div className={`hidden sm:flex items-center gap-3 px-4 py-2 rounded-[10px] border shadow-[0_2px_8px_rgba(26,58,26,0.04)] text-[13px] font-medium transition-colors duration-500 ${isDarkTheme ? "bg-[#234523] border-white/5 text-white" : "bg-white border-[rgba(26,58,26,0.1)] text-[#1A3A1A]"}`}>
-              <span className="text-[16px]">🌤️</span> 28°C · Sunny
+              <span className="text-[16px]">{weather?.condition?.includes("Rain") ? "🌧️" : weather?.condition?.includes("Cloud") ? "☁️" : "🌤️"}</span>
+              {weather ? `${Math.round(weather.temperature || 0)}°C · ${weather.condition || "—"}` : t("Weather N/A", lang)}
             </div>
             
             <button onClick={toggleTheme} className={`relative w-10 h-10 rounded-full border flex items-center justify-center transition-colors duration-500 ${isDarkTheme ? "bg-[#234523] border-white/5 text-white hover:bg-white/10" : "bg-white border-[rgba(26,58,26,0.1)] shadow-[0_2px_8px_rgba(26,58,26,0.04)] text-[#1A3A1A] hover:bg-[#FAFBF7]"}`}>
@@ -109,8 +155,8 @@ export default function FarmerLayout({ children }: { children: React.ReactNode }
           { id: "/dashboard", icon: LayoutDashboard },
           { id: "/history", icon: History },
           { id: "/diagnose", icon: Camera, center: true },
-          { id: "#", icon: BarChart2 },
-          { id: "#", icon: Settings },
+          { id: "/score", icon: BarChart2 },
+          { id: "/settings", icon: Settings },
         ].map((item, i) => (
           <Link key={i} to={item.id} className="relative flex flex-col items-center justify-center w-12 h-12">
             {item.center ? (
@@ -123,6 +169,9 @@ export default function FarmerLayout({ children }: { children: React.ReactNode }
           </Link>
         ))}
       </div>
+
+      {/* CHAT WIDGET */}
+      <ChatWidget />
     </div>
   );
 }
