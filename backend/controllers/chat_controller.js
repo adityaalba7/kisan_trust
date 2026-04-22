@@ -73,7 +73,8 @@ export const getConversations = async (req, res) => {
 
         return res.json({ conversations: enriched.filter(Boolean) });
     } catch (error) {
-        console.log(error);
+        console.error("GET CONVERSATIONS ERROR:", error.message || error);
+        if (error.stack) console.error(error.stack);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 };

@@ -22,7 +22,8 @@ router.get("/", verifyToken, async (req, res) => {
             method: result.method, // "formula" or "ml-model"
         });
     } catch (error) {
-        console.log(error);
+        console.error("SCORE ERROR:", error.message || error);
+        if (error.stack) console.error(error.stack);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 });
@@ -84,7 +85,8 @@ router.get("/breakdown", verifyToken, async (req, res) => {
             },
         });
     } catch (error) {
-        console.log(error);
+        console.error("SCORE BREAKDOWN ERROR:", error.message || error);
+        if (error.stack) console.error(error.stack);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 });
@@ -104,7 +106,8 @@ router.get("/features", verifyToken, async (req, res) => {
 
         return res.status(200).json({ features });
     } catch (error) {
-        console.log(error);
+        console.error("SCORE FEATURES ERROR:", error.message || error);
+        if (error.stack) console.error(error.stack);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 });

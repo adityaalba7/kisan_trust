@@ -265,7 +265,8 @@ export const getDiagnoses = async (req, res) => {
             diagnoses,
         });
     } catch (error) {
-        console.log(error);
+        console.error("GET DIAGNOSES ERROR:", error.message || error);
+        if (error.stack) console.error(error.stack);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 };
