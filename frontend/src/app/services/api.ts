@@ -5,7 +5,8 @@
  * Handles JWT token management, request/response formatting.
  */
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL ? `${import.meta.env.VITE_BACKEND_URL}/api` : "http://localhost:3000/api";
+const VITE_BACKEND_URL = import.meta.env.VITE_BACKEND_URL?.replace(/\/$/, "");
+const API_BASE = VITE_BACKEND_URL ? `${VITE_BACKEND_URL}/api` : "http://localhost:3000/api";
 
 // ---------------------------------------------------------------------------
 // Token helpers
